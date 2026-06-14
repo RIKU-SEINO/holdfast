@@ -213,12 +213,14 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 - **MUST** `sync.Mutex` / channel の単一所有 / リソースごとの細粒度ロックで `Claim` をアトミックにする。
 - **MUST** 適合テストの並行性プロパティが in-memory で緑になる。
 - **STRETCH** 確保探索は並列、枠の確定だけ直列、という構造でスループットを上げる。
+- **STRETCH** TOCTOU 比較実験：mutex なしの `UnsafeStore` を作り、並行 Acquire で枠の過剰確保が実際に発生することを測定する。`runtime.Gosched()` を `Read` と `Write` の間に挟み割り込み確率を上げ、「N 回中 M 回で capacity 超過」を出力するテストを書く。その後 mutex で修正し、過剰確保ゼロを確認する。
 
 **設計の問い**
 
 - リソース全体を 1 つの Mutex で守る vs リソースごとに守る——スループットとデッドロックのトレードオフは？
 - Mutex と channel、この `Claim` ではどちらが素直に書ける？
 - ロック自体が壁になったら、何を測ってどう緩める？
+- TOCTOU（check-then-act）が「なぜ壊れるか」を goroutine スケジューラの言葉で説明せよ。`runtime.Gosched()` はなぜ再現率を上げる？
 
 **完了条件 (DoD)**
 
@@ -456,12 +458,22 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 - **MUST** Fly.io に Go バックエンド + Postgres をデプロイし、外部から叩けるようにする。
 - **MUST** `ErrExhausted`（枠切れ）を UI でわかる形でハンドルする。
 - **STRETCH** 複数タブで同時に操作し、フェンシングトークンが防御していることを視覚的に示す。
+- **STRETCH** TOCTOU 比較デモ：`/naive/reserve`（非アトミックな素朴実装）と `/holdfast/reserve`（holdfast 使用）の 2 エンドポイントを置き、`/stats` で過剰確保カウント・試行回数・失敗率を JSON で返す。負荷をかけた結果を同一画面で並べて比較できるようにする。
+
+```json
+// GET /stats の返却イメージ
+{
+  "naive":    { "requests": 1000, "over_committed": 43, "rate": "4.3%" },
+  "holdfast": { "requests": 1000, "over_committed":  0, "rate": "0.0%" }
+}
+```
 
 **設計の問い**
 
 - holdfast をライブラリとして使う側（応用例）は、Store のどの実装を選ぶ？ その理由は？
-- `ErrExhausted` を受け取ったとき、UI はユーザーに何を伝えるべきか？
+- `ErrExhausted` を受け取ったとき、UI はユーザーに何を伝えるべきか？ HTTP ステータスコードは何が適切か？
 - Fly.io の Postgres と holdfast の Store 契約はどこで繋がる？
+- TOCTOU 比較で naive 実装の過剰確保率は何%だったか？ 並行 goroutine 数を増やすと率はどう変わるか？
 
 **完了条件 (DoD)**
 
@@ -515,3 +527,34 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 ### この 1 周を終えたら
 
 各フェーズの「設計の問い」への答えを並べると、そのまま濃い LT 群になる。例：「枠を壊す異常はなぜ write skew か」「分散ロックを持つことが安全を意味しない理由（フェンシング）」「冪等キーがなぜメッシュの retry を安全にするのか」「汎用の高さを semaphore 相当に置いた理由」。作って・壊して・説明できる状態が、理解の定着の証拠。
+
+---
+
+## 9. 巻末 E：将来の拡張候補（ロードマップ外）
+
+Phase 0–8 を終えた後に検討できる、コアへの追加候補。**今は作らない**——必要性が実感できてから足す。
+
+### Store interface への追加
+
+| 機能 | シグネチャ（案） | なぜ必要になるか | 追加の目安 |
+|---|---|---|---|
+| **Renew（TTL 延長）** | `Renew(ctx, RenewRequest) error` | 処理が長引いたとき TTL 切れで Lease が失効するのを防ぐ。今は「TTL を長めに設定する」しかない | Phase 2 以降 |
+| **Watch（空き枠通知）** | `Watch(ctx, resource) (<-chan struct{}, error)` | `ErrExhausted` 時にポーリングではなくプッシュで通知を受けられる。gRPC server streaming と相性が良い | Phase 3 以降 |
+| **ListLeases（管理 API）** | `ListLeases(ctx, resource string) ([]Lease, error)` | 現状は「外から見えない」。運用・デバッグで現在の確保状況を確認したい | Phase 3 以降 |
+
+### セキュリティ
+
+| 脅威 | 対処 | 実装場所 | 時期 |
+|---|---|---|---|
+| 誰でも Acquire できる | mTLS + gRPC interceptor で AuthN | `holdfastd` のサーバ実装 | Phase 3 |
+| 他テナントの Lease を Release できる | LeaseID にテナントプレフィックスを含める | `Store` の規約または Middleware | Phase 3 |
+| 操作の Audit 証跡がない | Acquire/Commit/Release のログ hook | gRPC interceptor | Phase 3–7 |
+
+**Mode①（組み込み）では Store 層にセキュリティを追加しない。** 呼び出し元は同じプロセスの信頼済みコード。セキュリティの責務を混入させると「依存ゼロ」の強みが壊れる。
+
+### 比較・実験（Phase 8 で実装）
+
+| 実験 | 内容 | 示せること |
+|---|---|---|
+| **TOCTOU 比較デモ** | naive 実装 vs holdfast の過剰確保率を `/stats` で公開 | 「なぜ holdfast が必要か」を実測で示す |
+| **フェンシングトークンなし比較** | token チェックを省いた実装で stale commit を再現 | フェンシングの意味を動く形で示す |
