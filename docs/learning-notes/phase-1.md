@@ -35,9 +35,25 @@
 
 > 回答：
 
+**Q6. TOCTOU（Time Of Check, Time Of Use）とは何か？ in-memory Store の `Acquire` でどこが「check」でどこが「use」か？**
+
+> 回答：
+
+**Q7. `runtime.Gosched()` を `check` と `use` の間に挟むと、なぜ過剰確保の再現率が上がるのか？**
+
+> 回答：
+
 ---
 
 ## 学習メモ
+
+### TOCTOU 実験メモ
+
+> UnsafeStore の実験結果をここに記録する
+
+| 試行回数 | goroutine 数 | capacity | 過剰確保発生回数 | 発生率 |
+|---|---|---|---|---|
+| | | | | |
 
 ### ハマりメモ
 
@@ -66,5 +82,13 @@
 > 回答：
 
 **Q3. `sync.RWMutex` を使うとしたら `MemoryStore` のどのメソッドで `RLock` を使える？ 今の実装で使えない理由は？**
+
+> 回答：
+
+**Q4. TOCTOU 実験で、goroutine 数を 2 / 10 / 100 と増やすと過剰確保率はどう変わったか？ なぜそうなる？**
+
+> 回答：
+
+**Q5. `UnsafeStore` に `go test -race` をかけると何が出力されるか？ mutex 追加後は出力がどう変わるか？**
 
 > 回答：
