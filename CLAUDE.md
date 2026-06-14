@@ -4,15 +4,15 @@
 > **最初に読んで、ここに書かれた設計・不変条件・進め方の約束を守ってください。**
 >
 > **全体像・各 Phase の詳細（要件 / 設計の問い / DoD / 落とし穴 / レイヤー地図 / 教材対応）は [`docs/ROADMAP.md`](docs/ROADMAP.md) に全部あります。** 本ファイルは日々の作業用の要約。Phase に取りかかる前に ROADMAP の該当 Phase を必ず参照すること。
-> **各 Phase の事前読書・クイズ・参考書籍は [`docs/STUDY_GUIDE.md`](docs/STUDY_GUIDE.md) にあります。** Phase 開始前に該当 Phase のクイズ①を解いてから手を動かすこと。
+> **各 Phase の事前読書・クイズ・学習メモは [`docs/learning-notes/`](docs/learning-notes/) にあります。** `phase-N.md` を開き、クイズ①を解いてから手を動かすこと。回答・ハマりメモ・ミスログも同ファイルに書き込む。
 
 ---
 
 ## 0. まず置き換えるもの
 
-- モジュールパス `github.com/<you>/holdfast` は、**実際の GitHub リポのパスに全て置換**してください。
-- 現在地：**Phase 0（コア契約 + in-memory 実装）**。
-- 次の増分：TTL 失効（`Reap` 実装 + テスト）→ 冪等キー。
+- モジュールパス：`github.com/RIKU-SEINO/holdfast`（置換済み）。
+- 現在地：**Phase 1（Go 並行 — mutex で MemoryStore を並行安全にする）**。
+- 次の増分：`go test -race` で壊れるテストを書く → mutex で直す → `go test -race` を緑にする。
 
 ---
 
@@ -39,27 +39,23 @@
 ルートパッケージ `holdfast`（`holdfast.go`）が契約。**ロジックは持たず、型と interface だけ**。
 
 ```go
-type AcquireRequest struct {
-    Resource       string
-    Units          int
-    TTL            time.Duration
-    IdempotencyKey string // 冪等な再試行のため（Phase 0 後半で有効化）
-}
-type Lease struct {
-    ID      string
-    Token   uint64    // 単調増加するフェンシングトークン
-    Expires time.Time
-}
-type Receipt struct{ LeaseID string }
+type RegisterRequest struct { Resource string; Capacity int }
+type AcquireRequest  struct { Resource string; Units int; TTL time.Duration; IdempotencyKey string }
+type CommitRequest   struct { LeaseID string; Token uint64 }
+type ReleaseRequest  struct { LeaseID string; Token uint64 }
+type Lease           struct { ID string; Token uint64; Expires time.Time }
+type Receipt         struct { LeaseID string }
 
-var ErrExhausted = errors.New("holdfast: no units available")
-var ErrConflict  = errors.New("holdfast: stale token or unknown lease")
+var ErrUnknownResource = errors.New("holdfast: unknown resource")
+var ErrExhausted       = errors.New("holdfast: no units available")
+var ErrConflict        = errors.New("holdfast: stale token or unknown lease")
 
 // バックエンドが満たすべき唯一の契約。
 type Store interface {
+    Register(ctx context.Context, req RegisterRequest, now time.Time) error
     Acquire(ctx context.Context, req AcquireRequest, now time.Time) (Lease, error)
-    Commit(ctx context.Context, leaseID string, token uint64) (Receipt, error)
-    Release(ctx context.Context, leaseID string, token uint64) error
+    Commit(ctx context.Context, req CommitRequest) (Receipt, error)
+    Release(ctx context.Context, req ReleaseRequest) error
     Reap(ctx context.Context, now time.Time) (int, error)
 }
 ```
@@ -155,9 +151,11 @@ docker compose exec dev go mod tidy
 
 ## 7. Claude への進め方の約束（重要）
 
-開発者は **0→1 SaaS の経験者**（Node / React / AWS CDK / CloudFormation / AWS）だが、**Go・k8s・Terraform は初心者**。**作りながら学びたい**。これを踏まえて：
+開発者は **0→1 SaaS の経験者**（Node / React / AWS CDK / CloudFormation / AWS）。
+**Go は Phase 0 を経て基本的な読み書きができるようになった段階**。k8s・Terraform は未経験。**作りながら学びたい**。これを踏まえて：
 
-- **学習者向けに進める。** コードを丸投げせず、「なぜそうするか」を簡潔に添える。特に **TS と違う Go の癖**（構造的に満たせば自動で interface 実装になる／例外でなく `error` を返す／ゼロ値）を要所で指摘する。また、開発者に対して常に質問の投げかけや、設計意図など、エッセンスを習得できるようになるためのフィードバックを欠かさない。
+- **学習者向けに進める。** コードを丸投げせず、「なぜそうするか」を簡潔に添える。特に **TS と違う Go の癖**（構造的に満たせば自動で interface 実装になる／例外でなく `error` を返す／ゼロ値／ポインタレシーバ）を要所で指摘する。また、常に問いを投げかけ、設計意図のエッセンスを自分の言葉で語れるようフィードバックを欠かさない。
+- **`docs/learning-notes/phase-N.md` を活用する。** Phase 開始前にクイズ①を解いてから実装し、ハマりメモ・ミスログ・クイズ②の回答を同ファイルに蓄積させる。
 - **小さい増分で進め、各ステップで `go test ./...` を緑に保つ。** 大きな変更を一度に出さない。
 - **「まず素朴に作って、わざと壊して、直す」教育的順序を守る。** 例：Phase 1 は最初から完璧な並行実装を目指さず、単一スレッド → 並行で `-race` が壊れるのを見せる → mutex で直す。先回りの最適化をしない。
 - **一度に 1 つの新技術。** Phase の順序を飛ばして k8s や Terraform を持ち込まない。
