@@ -15,9 +15,17 @@ type leaseRecord struct {
 	expires		time.Time
 }
 
+func (l leaseRecord) isExpired(now time.Time) bool {
+	return now.After(l.expires)
+}
+
 type resourceState struct {
 	capacity	int
 	used			int
+}
+
+func (r resourceState) isExhausted(units int) bool {
+	return r.used+units > r.capacity
 }
 
 type MemoryStore struct {
@@ -50,15 +58,12 @@ func (s *MemoryStore) Acquire(ctx context.Context, req holdfast.AcquireRequest, 
 		return holdfast.Lease{}, holdfast.ErrUnknownResource
 	}
 
-	used := s.resources[req.Resource].used
-	capacity := s.resources[req.Resource].capacity
+	state := s.resources[req.Resource]
 	units := req.Units
-
-	if used+units > capacity {
+	if state.isExhausted(units) {
 		return holdfast.Lease{}, holdfast.ErrExhausted
 	}
 
-	state := s.resources[req.Resource]
 	state.used += units
 	s.resources[req.Resource] = state
 
@@ -69,7 +74,7 @@ func (s *MemoryStore) Acquire(ctx context.Context, req holdfast.AcquireRequest, 
 	expires := now.Add(req.TTL)
 	s.leases[leaseId] = leaseRecord{
 		resource: req.Resource,
-		units:    req.Units,
+		units:    units,
 		token:    token,
 		expires:  expires,
 	}
@@ -113,18 +118,19 @@ func (s *MemoryStore) Release(ctx context.Context, req holdfast.ReleaseRequest) 
 
 func (s *MemoryStore) Reap(ctx context.Context, now time.Time) (int, error) {
 	count := 0
-	for key, value := range s.leases {
-		if now.After(value.expires) {
-			resource := value.resource
-			units := value.units
-			state := s.resources[resource]
-			state.used -= units
-			s.resources[resource] = state
-
-			delete(s.leases, key)
-
-			count++
+	for leaseId, leaseRecord := range s.leases {
+		if !leaseRecord.isExpired(now) {
+			continue
 		}
+		resource := leaseRecord.resource
+		units := leaseRecord.units
+		state := s.resources[resource]
+		state.used -= units
+		s.resources[resource] = state
+
+		delete(s.leases, leaseId)
+
+		count++
 	}
 
 	return count, nil
