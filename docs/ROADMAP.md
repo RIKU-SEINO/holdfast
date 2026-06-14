@@ -2,7 +2,7 @@
 
 > 希少リソースを排他確保する**汎用リース基盤**を、作って・壊して・運用するための全体設計とフェーズ計画。
 > 日々の進め方・約束・コマンドは [`/CLAUDE.md`](../CLAUDE.md) を参照。本書は「全体像と各 Phase の詳細」を持つ。
-> **各 Phase の事前読書・クイズは [`docs/STUDY_GUIDE.md`](STUDY_GUIDE.md) にあります。** Phase 開始前に STUDY_GUIDE の該当 Phase を必ず参照すること。
+> **各 Phase の事前読書・クイズ・学習メモは [`docs/learning-notes/`](learning-notes/) にあります。** Phase 開始前に `phase-N.md` を開き、クイズ①を解いてから手を動かすこと。
 
 ---
 

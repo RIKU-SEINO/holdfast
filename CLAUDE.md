@@ -4,7 +4,7 @@
 > **最初に読んで、ここに書かれた設計・不変条件・進め方の約束を守ってください。**
 >
 > **全体像・各 Phase の詳細（要件 / 設計の問い / DoD / 落とし穴 / レイヤー地図 / 教材対応）は [`docs/ROADMAP.md`](docs/ROADMAP.md) に全部あります。** 本ファイルは日々の作業用の要約。Phase に取りかかる前に ROADMAP の該当 Phase を必ず参照すること。
-> **各 Phase の事前読書・クイズ・参考書籍は [`docs/STUDY_GUIDE.md`](docs/STUDY_GUIDE.md) にあります。** Phase 開始前に該当 Phase のクイズ①を解いてから手を動かすこと。
+> **各 Phase の事前読書・クイズ・学習メモは [`docs/learning-notes/`](docs/learning-notes/) にあります。** `phase-N.md` を開き、クイズ①を解いてから手を動かすこと。回答・ハマりメモ・ミスログも同ファイルに書き込む。
 
 ---
 
