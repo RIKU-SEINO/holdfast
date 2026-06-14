@@ -10,9 +10,9 @@
 
 ## 0. まず置き換えるもの
 
-- モジュールパス `github.com/<you>/holdfast` は、**実際の GitHub リポのパスに全て置換**してください。
-- 現在地：**Phase 0（コア契約 + in-memory 実装）**。
-- 次の増分：TTL 失効（`Reap` 実装 + テスト）→ 冪等キー。
+- モジュールパス：`github.com/RIKU-SEINO/holdfast`（置換済み）。
+- 現在地：**Phase 1（Go 並行 — mutex で MemoryStore を並行安全にする）**。
+- 次の増分：`go test -race` で壊れるテストを書く → mutex で直す → `go test -race` を緑にする。
 
 ---
 
@@ -39,27 +39,23 @@
 ルートパッケージ `holdfast`（`holdfast.go`）が契約。**ロジックは持たず、型と interface だけ**。
 
 ```go
-type AcquireRequest struct {
-    Resource       string
-    Units          int
-    TTL            time.Duration
-    IdempotencyKey string // 冪等な再試行のため（Phase 0 後半で有効化）
-}
-type Lease struct {
-    ID      string
-    Token   uint64    // 単調増加するフェンシングトークン
-    Expires time.Time
-}
-type Receipt struct{ LeaseID string }
+type RegisterRequest struct { Resource string; Capacity int }
+type AcquireRequest  struct { Resource string; Units int; TTL time.Duration; IdempotencyKey string }
+type CommitRequest   struct { LeaseID string; Token uint64 }
+type ReleaseRequest  struct { LeaseID string; Token uint64 }
+type Lease           struct { ID string; Token uint64; Expires time.Time }
+type Receipt         struct { LeaseID string }
 
-var ErrExhausted = errors.New("holdfast: no units available")
-var ErrConflict  = errors.New("holdfast: stale token or unknown lease")
+var ErrUnknownResource = errors.New("holdfast: unknown resource")
+var ErrExhausted       = errors.New("holdfast: no units available")
+var ErrConflict        = errors.New("holdfast: stale token or unknown lease")
 
 // バックエンドが満たすべき唯一の契約。
 type Store interface {
+    Register(ctx context.Context, req RegisterRequest, now time.Time) error
     Acquire(ctx context.Context, req AcquireRequest, now time.Time) (Lease, error)
-    Commit(ctx context.Context, leaseID string, token uint64) (Receipt, error)
-    Release(ctx context.Context, leaseID string, token uint64) error
+    Commit(ctx context.Context, req CommitRequest) (Receipt, error)
+    Release(ctx context.Context, req ReleaseRequest) error
     Reap(ctx context.Context, now time.Time) (int, error)
 }
 ```
