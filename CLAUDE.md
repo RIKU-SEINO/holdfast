@@ -113,14 +113,14 @@ holdfast/  (このリポ = コア + サーバ + 運用層 / monorepo)
 
 | Phase | 作るもの | 新しく触る技術 | 状態 |
 |---|---|---|---|
-| 0 | コア契約 + in-memory 実装 + 適合テスト | Go | **進行中** |
-| 1 | 競合を作って mutex/channel で守る | Go 並行 | |
+| 0 | コア契約 + in-memory 実装 + 適合テスト | Go | **完了** |
+| 1 | 競合を作って mutex/channel で守る | Go 並行 | **進行中** |
 | 2 | Postgres バックエンド | Postgres / トランザクション | |
-| 3 | コアを gRPC サービスで包む + SDK | gRPC / protobuf | |
-| 4 | Envoy サイドカー（holdfast 自身の通信） | Service Mesh | |
-| 5 | Raft バックエンド（自作 or hashicorp/raft） | 合意 / フェンシング | |
-| 6 | Terraform + k8s で holdfast クラスタを構築 | Terraform / k8s | |
-| 7 | 分散トレーシング + SLO + カオス試験 | OTel / SRE | |
+| 3 | コアを gRPC サービスで包む + SDK（graceful shutdown・/livez vs /readyz・context timeout 含む） | gRPC / protobuf | |
+| 4 | Envoy サイドカー（holdfast 自身の通信、bulkhead・circuit breaker 含む） | Service Mesh | |
+| 5 | Raft バックエンド（async 非同期レプリケーション体験 → consensus 実装） | 合意 / フェンシング | |
+| 6 | Terraform + k8s で holdfast クラスタを構築（multi-stage Dockerfile・PDB・HPA 含む） | Terraform / k8s | |
+| 7 | 分散トレーシング + SLO + カオス試験（burn rate アラート 含む） | OTel / SRE | |
 
 各 Phase の **完了条件（DoD）を満たすまで次に進まない**。深掘りは別途の課題ハンドブック（PDF）参照。
 
