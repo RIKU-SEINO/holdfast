@@ -2,6 +2,7 @@
 
 > 希少リソースを排他確保する**汎用リース基盤**を、作って・壊して・運用するための全体設計とフェーズ計画。
 > 日々の進め方・約束・コマンドは [`/CLAUDE.md`](../CLAUDE.md) を参照。本書は「全体像と各 Phase の詳細」を持つ。
+> **各 Phase の事前読書・クイズは [`docs/STUDY_GUIDE.md`](STUDY_GUIDE.md) にあります。** Phase 開始前に STUDY_GUIDE の該当 Phase を必ず参照すること。
 
 ---
 
@@ -271,6 +272,9 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 - **MUST** コアを薄い gRPC サービスで包む。proto で `Acquire/Commit/Release` を定義。
 - **MUST** 別言語の SDK を生成（例：React 例アプリ用の TypeScript、または Python）。
 - **MUST** 冪等キーを API に通し、再送が安全であることを保証する。
+- **MUST** graceful shutdown：SIGTERM で新規受付を止め、処理中 RPC を待ってから終了（drain）する。
+- **MUST** `/livez`（自分が生きているか）と `/readyz`（Store に繋がっているか）を分ける。
+- **MUST** `context.Context` による timeout を全 RPC に通す。サーバの read/write deadline も設定する。
 - **STRETCH** 空き枠のライブ更新を server streaming で配信し、React 盤面に反映。
 
 **設計の問い**
@@ -278,14 +282,18 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 - 「組み込み（import）」と「サービス（gRPC）」で、API 契約は同じに保てる？ どこがズレる？
 - 後方互換なスキーマ進化とは？ フィールド番号の再利用・削除で何が壊れる？
 - Acquire は同期呼び出しか、キュー投入の非同期か。リアルタイム性と信頼性のどちらを取る？
+- `/livez` に Store の健全性チェックを入れると何が起きる？（→ Phase 6 の落とし穴に直結）
 
 **完了条件 (DoD)**
 
 - 同じコアが import でもサービス越しでも使え、適合テストの本質が両方で通る。生成 SDK で React 例アプリが動く。
+- SIGTERM 送信時、処理中 RPC が 1 件も切り捨てられない。
 
 **落とし穴**
 
 - chatty な往復でレイテンシ悪化。proto の破壊的変更を無自覚に入れる。
+- timeout を設定せず、Store のハングが goroutine を食い尽くす（cascading failure の典型）。
+- liveness に Store の健全性チェックを入れて、Store 不調で自分が再起動ループに陥る。
 
 ---
 
@@ -299,6 +307,7 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 - **MUST** 各 Pod に Envoy をサイドカー注入し、サービス間通信を通す。
 - **MUST** Envoy 設定だけで timeout / retry / circuit breaking（接続・リクエスト上限）/ outlier detection を実現。
 - **MUST** サービス間を mTLS 化する。
+- **STRETCH** bulkhead：upstream（Store / Postgres）ごとに同時接続数を隔離し、1 つの障害が全体を道連れにしない。
 - **STRETCH** カナリア／トラフィック分割やリクエストミラーリングを設定で。
 
 > **伏線回収（CORE）：なぜメッシュの retry が安全なのか**
@@ -308,6 +317,8 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 
 - アプリに残す責務（冪等性・整合性）と、メッシュに出す責務（再送・遮断）の境界は？
 - retry を**アプリとメッシュの両方**に持つと何が起きる？ retry 予算はどこで管理する？
+- circuit breaker の half-open は何のためにある？ いつ「もう回復した」と判断する？
+- 全クライアントが一斉に retry すると retry storm で下流にとどめを刺す。指数バックオフ＋jitter はどう防ぐ？
 
 **完了条件 (DoD)**
 
@@ -327,7 +338,8 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 
 **要件**
 
-- **MUST** 複製ログ（`hashicorp/raft`、または自前 → MIT 6.5840）を土台に Raft Store を実装する。
+- **MUST** まず素朴に **leader-follower の非同期複製**を実装する：書き込みは leader、follower は追従。follower read で古い値（staleness）を実際に観察する。
+- **MUST** 次に**合意アルゴリズム**で線形化可能性を達成する。複製ログ（`hashicorp/raft`、または自前 → MIT 6.5840）を土台に Raft Store を実装する。
 - **MUST** Phase 0 の適合テストを Raft バックエンドにも**無改造で通す**（3 つ目の通過バックエンド）。
 - **MUST** 1 ノード落としても Acquire／Commit が継続し、復帰ノードが catch up する。
 - **STRETCH** 分断下でも枠超過（二重確保）しないことを Jepsen/Maelstrom 流の履歴検証（線形化可能性）で示す。
@@ -359,10 +371,13 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 
 **要件**
 
-- **MUST** Terraform でクラスタ（ローカルは `kind`、本番志向は EKS）とマネージド Postgres を構築。
+- **MUST** multi-stage の Dockerfile を書く。`CGO_ENABLED=0` の静的バイナリを distroless か scratch に載せ最小イメージにする。
+- **MUST** Terraform で `kind` クラスタとローカル Postgres を構築。
 - **MUST** サービス / サイドカー注入 / Envoy 設定 / Secret を宣言的に管理。
 - **MUST** DB マイグレーションをデプロイの一部（Job / フック）として再現可能に。
 - **MUST** 再利用単位を module に切り出す。
+- **MUST** `PodDisruptionBudget` で同時退避上限を設定し、rolling update 中も最低限の稼働を保証する。
+- **STRETCH** HPA で CPU（またはカスタム指標）に応じてスケール。
 - **STRETCH** state を lock 付き remote backend へ。「複数人が apply」前提を体験。
 
 **設計の問い**
@@ -370,14 +385,20 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 - state は誰が・どこに持つ？ apply の権利は誰が握る？
 - マイグレーションをデプロイにどう織り込む？ ロールバック時スキーマはどう戻す？
 - 手で `kubectl edit` された drift を `plan` はどう見せ、どう戻す？
+- `resources.requests` と `limits` を同じ値にすると QoS class はどうなる？ CPU throttling と OOMKilled はなぜ挙動が違う？
+- rolling update 中に古い Pod が SIGTERM を受けてから消えるまで、readiness と `terminationGracePeriodSeconds` はどう連携する？（Phase 3 の graceful shutdown が効いてくる）
 
 **完了条件 (DoD)**
 
 - `terraform apply` 一発で、クラスタ＋DB＋サービス＋Envoy がゼロから立つ。`destroy` で綺麗に消える。
+- `kubectl rollout` による更新がクライアントから見て無停止（5xx が出ない）。
+- Pod を手で delete しても自動復旧し、数秒でトラフィックに復帰する。
 
 **落とし穴**
 
 - state lock 無しの同時 apply で破壊。Secret を state/tfvars に平文。マイグレーションを手運用に残す。
+- `readinessProbe` の初期遅延不足で、起動途中の Pod にトラフィックが流れる。
+- memory limit が過小で OOMKilled を繰り返す。
 
 ---
 
@@ -392,6 +413,7 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 - **MUST** RED 指標（Rate / Errors / Duration、レイテンシは histogram）と構造化ログ（`log/slog`）。
 - **MUST** SLI / SLO を定義（例：Acquire 成功率 99.9%、p99 < Xms）し error budget を導く。
 - **MUST** 負荷（k6 / vegeta、需要スパイク=フラッシュセールを模す）＋ カオス（pod kill・DB 遅延・Raft をパーティション）で SLO 違反を再現。
+- **STRETCH** burn rate アラートを実装する（短期ウィンドウ 1h + 長期ウィンドウ 6h の 2 段構えで、急激な error budget 消費を早期検知する）。
 - **STRETCH** 「確保競合率」「期限切れ回収の遅れ」専用の SLI を設け、React 側に簡易 SLO ダッシュボードを出す。
 
 **設計の問い**
@@ -399,6 +421,7 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 - 良い SLI はユーザー体験に近い。CPU 使用率が SLI として弱いのはなぜ？
 - 平均は tail を隠す。p99 / p999 を見るべき理由と histogram bucket の切り方は？
 - アラートを「原因」でなく「症状」で鳴らすとは、具体的にどう設計する？
+- burn rate が「1」を超えるとはどういう意味か？ 短期 + 長期の 2 ウィンドウを使う理由は？（SRE Workbook ch.5）
 
 **完了条件 (DoD)**
 
@@ -407,6 +430,47 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 **落とし穴**
 
 - 高カーディナリティラベルでメトリクス破裂。cause-based アラート過多で症状を見逃す。
+
+---
+
+### Phase 8 — 応用例で holdfast を使う（別リポ `holdfast-examples/`）
+
+**ゴール**：holdfast をライブラリとして import した薄い応用例を別リポで実装し、Fly.io にデプロイする。「この部品が実際に何を解くか」を動く形で示す。
+**新技術**：Fly.io / フルスタック統合
+**リポジトリ**：`github.com/RIKU-SEINO/holdfast-examples`（このリポとは別）
+
+> **重要な区別**：Phase 3〜7 は holdfast 自体を gRPC サービスとして運用する（学習目的）。Phase 8 は holdfast を **mode①（組み込み）** として使う応用例。k8s / Raft は出てこない。
+
+**構成**
+
+```
+[React]  →  [Go バックエンド（holdfast を import）]  →  [Postgres（Store として）]
+                        ↑
+               holdfast.New(memoryStore or pgStore)
+```
+
+**要件**
+
+- **MUST** 応用例を 1 つ実装する（座席予約 / 在庫引当 / レート制限など）。
+- **MUST** holdfast の `Acquire → Commit / Release` が実際のユースケースで機能することを示す。
+- **MUST** Fly.io に Go バックエンド + Postgres をデプロイし、外部から叩けるようにする。
+- **MUST** `ErrExhausted`（枠切れ）を UI でわかる形でハンドルする。
+- **STRETCH** 複数タブで同時に操作し、フェンシングトークンが防御していることを視覚的に示す。
+
+**設計の問い**
+
+- holdfast をライブラリとして使う側（応用例）は、Store のどの実装を選ぶ？ その理由は？
+- `ErrExhausted` を受け取ったとき、UI はユーザーに何を伝えるべきか？
+- Fly.io の Postgres と holdfast の Store 契約はどこで繋がる？
+
+**完了条件 (DoD)**
+
+- Fly.io 上で応用例が動く URL がある。`Acquire` が枠を超えたとき `ErrExhausted` が正しくハンドルされる。
+
+**落とし穴**
+
+- holdfast の gRPC サーバーを立てようとする（mode ② に引っ張られる）。ここでは `import` するだけ。
+- 応用例に holdfast のロジックを再実装してしまう（ドメインが漏れる）。
 
 ---
 
