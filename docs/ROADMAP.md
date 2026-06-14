@@ -2,6 +2,7 @@
 
 > 希少リソースを排他確保する**汎用リース基盤**を、作って・壊して・運用するための全体設計とフェーズ計画。
 > 日々の進め方・約束・コマンドは [`/CLAUDE.md`](../CLAUDE.md) を参照。本書は「全体像と各 Phase の詳細」を持つ。
+> **各 Phase の事前読書・クイズは [`docs/STUDY_GUIDE.md`](STUDY_GUIDE.md) にあります。** Phase 開始前に STUDY_GUIDE の該当 Phase を必ず参照すること。
 
 ---
 
@@ -371,7 +372,7 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 **要件**
 
 - **MUST** multi-stage の Dockerfile を書く。`CGO_ENABLED=0` の静的バイナリを distroless か scratch に載せ最小イメージにする。
-- **MUST** Terraform でクラスタ（ローカルは `kind`、本番志向は EKS）とマネージド Postgres を構築。
+- **MUST** Terraform で `kind` クラスタとローカル Postgres を構築。
 - **MUST** サービス / サイドカー注入 / Envoy 設定 / Secret を宣言的に管理。
 - **MUST** DB マイグレーションをデプロイの一部（Job / フック）として再現可能に。
 - **MUST** 再利用単位を module に切り出す。
@@ -429,6 +430,47 @@ Phase 0–2 は主に**モード①**（コアと各 Store を作る）。Phase 
 **落とし穴**
 
 - 高カーディナリティラベルでメトリクス破裂。cause-based アラート過多で症状を見逃す。
+
+---
+
+### Phase 8 — 応用例で holdfast を使う（別リポ `holdfast-examples/`）
+
+**ゴール**：holdfast をライブラリとして import した薄い応用例を別リポで実装し、Fly.io にデプロイする。「この部品が実際に何を解くか」を動く形で示す。
+**新技術**：Fly.io / フルスタック統合
+**リポジトリ**：`github.com/RIKU-SEINO/holdfast-examples`（このリポとは別）
+
+> **重要な区別**：Phase 3〜7 は holdfast 自体を gRPC サービスとして運用する（学習目的）。Phase 8 は holdfast を **mode①（組み込み）** として使う応用例。k8s / Raft は出てこない。
+
+**構成**
+
+```
+[React]  →  [Go バックエンド（holdfast を import）]  →  [Postgres（Store として）]
+                        ↑
+               holdfast.New(memoryStore or pgStore)
+```
+
+**要件**
+
+- **MUST** 応用例を 1 つ実装する（座席予約 / 在庫引当 / レート制限など）。
+- **MUST** holdfast の `Acquire → Commit / Release` が実際のユースケースで機能することを示す。
+- **MUST** Fly.io に Go バックエンド + Postgres をデプロイし、外部から叩けるようにする。
+- **MUST** `ErrExhausted`（枠切れ）を UI でわかる形でハンドルする。
+- **STRETCH** 複数タブで同時に操作し、フェンシングトークンが防御していることを視覚的に示す。
+
+**設計の問い**
+
+- holdfast をライブラリとして使う側（応用例）は、Store のどの実装を選ぶ？ その理由は？
+- `ErrExhausted` を受け取ったとき、UI はユーザーに何を伝えるべきか？
+- Fly.io の Postgres と holdfast の Store 契約はどこで繋がる？
+
+**完了条件 (DoD)**
+
+- Fly.io 上で応用例が動く URL がある。`Acquire` が枠を超えたとき `ErrExhausted` が正しくハンドルされる。
+
+**落とし穴**
+
+- holdfast の gRPC サーバーを立てようとする（mode ② に引っ張られる）。ここでは `import` するだけ。
+- 応用例に holdfast のロジックを再実装してしまう（ドメインが漏れる）。
 
 ---
 

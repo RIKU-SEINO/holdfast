@@ -4,6 +4,7 @@
 > **最初に読んで、ここに書かれた設計・不変条件・進め方の約束を守ってください。**
 >
 > **全体像・各 Phase の詳細（要件 / 設計の問い / DoD / 落とし穴 / レイヤー地図 / 教材対応）は [`docs/ROADMAP.md`](docs/ROADMAP.md) に全部あります。** 本ファイルは日々の作業用の要約。Phase に取りかかる前に ROADMAP の該当 Phase を必ず参照すること。
+> **各 Phase の事前読書・クイズ・参考書籍は [`docs/STUDY_GUIDE.md`](docs/STUDY_GUIDE.md) にあります。** Phase 開始前に該当 Phase のクイズ①を解いてから手を動かすこと。
 
 ---
 
@@ -121,6 +122,9 @@ holdfast/  (このリポ = コア + サーバ + 運用層 / monorepo)
 | 5 | Raft バックエンド（async 非同期レプリケーション体験 → consensus 実装） | 合意 / フェンシング | |
 | 6 | Terraform + k8s で holdfast クラスタを構築（multi-stage Dockerfile・PDB・HPA 含む） | Terraform / k8s | |
 | 7 | 分散トレーシング + SLO + カオス試験（burn rate アラート 含む） | OTel / SRE | |
+| 8 | **別リポ** `holdfast-examples/` — holdfast を import した応用例 + Fly.io デプロイ | Fly.io / フルスタック | |
+
+> **Phase 3〜7 は holdfast 自体を gRPC サービスとして動かす（学習）。Phase 8 は mode①（import）で使う応用例。k8s は Phase 8 には出てこない。**
 
 各 Phase の **完了条件（DoD）を満たすまで次に進まない**。深掘りは別途の課題ハンドブック（PDF）参照。
 

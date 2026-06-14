@@ -248,6 +248,32 @@
 
 ---
 
+## Phase 8 — 応用例の実装 + Fly.io デプロイ（別リポ）
+
+> このリポではなく `holdfast-examples/` で作業する。
+
+### 事前読書
+
+| 素材 | 何を得る | 優先度 |
+|---|---|---|
+| [Fly.io Docs: Quickstart (Go)](https://fly.io/docs/languages-and-frameworks/golang/) | `flyctl` の基本操作、`fly.toml` の書き方 | ★★★ |
+| [Fly.io Docs: Postgres](https://fly.io/docs/postgres/) | Fly.io 上の Postgres の立て方、接続方法 | ★★★ |
+| [Fly.io Docs: Secrets](https://fly.io/docs/apps/secrets/) | DB パスワード等の環境変数管理 | ★★☆ |
+
+### クイズ①（読後）
+
+1. `fly.toml` の `[http_service]` と `[[services]]` の違いは？
+2. Fly.io の Postgres は holdfast の Store 契約とどこで繋がる？（どのファイルに何を書く？）
+3. `flyctl secrets set DATABASE_URL=...` で設定した値はアプリ側でどう読む？
+
+### クイズ②（実装後）
+
+1. 応用例で `ErrExhausted` が返ったとき、UI にどう伝えた？ HTTP ステータスコードは何を選んだ？
+2. holdfast の `Acquire → Commit / Release` のサイクルを、応用例のユースケース（座席予約など）の言葉で説明せよ。
+3. ローカルでは in-memory Store、Fly.io では Postgres Store を使い分けた。切り替えをどう実装した？
+
+---
+
 ## 参考書籍まとめ
 
 | 書籍 | Phase | 一言メモ |
