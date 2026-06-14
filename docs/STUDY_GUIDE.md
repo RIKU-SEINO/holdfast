@@ -2,6 +2,7 @@
 
 > ROADMAP.md が「何を作るか」なら、このファイルは「どう学ぶか」。
 > Phase に入る前にここを読み、クイズを解いてから手を動かす。
+> **クイズの回答・ハマりメモ・気づきは [`docs/LEARNING_NOTES.md`](LEARNING_NOTES.md) に記入する。**
 
 ---
 
