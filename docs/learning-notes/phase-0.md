@@ -13,19 +13,19 @@
 
 **Q1. Go の interface は「宣言して実装します」と書かなくてもよい。TS の `implements` と何が違う？**
 
-> 回答：
+> 回答： TSではimplementsで実装を明示的に示すことで初めて実装であることが表現されるが、Goのinterfaceはメソッドが揃っていればそれは実装であると自動的に判断される構造的部分型としての特性を持つ。
 
 **Q2. `var x int` のとき `x` の値は何？ TS で言う `undefined` とどう違う？**
 
-> 回答：
+> 回答： var x intの場合、0で初期化される。Goでは変数初期化時にゼロ値が入るという特性がある。
 
 **Q3. `errors.New("foo") == errors.New("foo")` は `true` か `false` か？ なぜ？**
 
-> 回答：
+> 回答：false。Goではポインタをもとにして等しいかどうかを評価するため。
 
 **Q4. Go に例外（try/catch）がない。エラーをどう伝える？**
 
-> 回答：
+> 回答： Goでエラーを伝える基本はマルチリターンである。関数が（Lease, error）のように複数値を返し、呼び出し側が if err != nil でチェックする。
 
 ---
 
@@ -158,7 +158,7 @@ func (l leaseRecord) isExpired(now time.Time) bool {
 
 **Q2. `holdfast.ErrExhausted` を package-level var にした理由を「呼び出し側が `==` で比較できるから」以外の言葉で説明せよ。**
 
-> 回答：
+> 回答： package-level varに統一することで、パッケージ初期化時に1度だけ生成され、それ以降はずっと同じアドレスを使用するため、そのエラーオブジェクトの同一性が担保される。
 
 **Q3. map の値（struct）を直接 `s.resources[key].used++` と書けないのはなぜ？**
 
