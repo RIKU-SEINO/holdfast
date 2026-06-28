@@ -3,16 +3,17 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/RIKU-SEINO/holdfast"
 )
 
 type leaseRecord struct {
-	resource	string
-	units			int
-	token			uint64
-	expires		time.Time
+	resource string
+	units    int
+	token    uint64
+	expires  time.Time
 }
 
 func (l leaseRecord) isExpired(now time.Time) bool {
@@ -20,8 +21,8 @@ func (l leaseRecord) isExpired(now time.Time) bool {
 }
 
 type resourceState struct {
-	capacity	int
-	used			int
+	capacity int
+	used     int
 }
 
 func (r resourceState) isExhausted(units int) bool {
@@ -29,9 +30,10 @@ func (r resourceState) isExhausted(units int) bool {
 }
 
 type MemoryStore struct {
-	leases		map[string]leaseRecord
-	resources	map[string]resourceState
-	nextToken	uint64
+	mu        sync.Mutex
+	leases    map[string]leaseRecord
+	resources map[string]resourceState
+	nextToken uint64
 }
 
 func New() *MemoryStore {
@@ -42,6 +44,9 @@ func New() *MemoryStore {
 }
 
 func (s *MemoryStore) Register(ctx context.Context, req holdfast.RegisterRequest, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.resources[req.Resource]; exists {
 		return nil
 	}
@@ -54,6 +59,9 @@ func (s *MemoryStore) Register(ctx context.Context, req holdfast.RegisterRequest
 }
 
 func (s *MemoryStore) Acquire(ctx context.Context, req holdfast.AcquireRequest, now time.Time) (holdfast.Lease, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, exists := s.resources[req.Resource]; !exists {
 		return holdfast.Lease{}, holdfast.ErrUnknownResource
 	}
@@ -95,6 +103,9 @@ func (s *MemoryStore) validateLease(leaseID string, token uint64) (leaseRecord, 
 }
 
 func (s *MemoryStore) Commit(ctx context.Context, req holdfast.CommitRequest) (holdfast.Receipt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, err := s.validateLease(req.LeaseID, req.Token); err != nil {
 		return holdfast.Receipt{}, err
 	}
@@ -102,6 +113,9 @@ func (s *MemoryStore) Commit(ctx context.Context, req holdfast.CommitRequest) (h
 }
 
 func (s *MemoryStore) Release(ctx context.Context, req holdfast.ReleaseRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	lease, err := s.validateLease(req.LeaseID, req.Token)
 	if err != nil {
 		return err
@@ -117,6 +131,9 @@ func (s *MemoryStore) Release(ctx context.Context, req holdfast.ReleaseRequest) 
 }
 
 func (s *MemoryStore) Reap(ctx context.Context, now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	count := 0
 	for leaseId, leaseRecord := range s.leases {
 		if !leaseRecord.isExpired(now) {

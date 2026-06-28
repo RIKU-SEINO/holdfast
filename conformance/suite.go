@@ -2,6 +2,8 @@ package conformance
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +17,7 @@ func Run(t *testing.T, store holdfast.Store) {
 	t.Run("枠を超えて確保できない", func(t *testing.T) { testExhausted(t, store) })
 	t.Run("古いtokenは弾かれる", func(t *testing.T) { testStaleToken(t, store) })
 	t.Run("TTLが切れると枠が戻る", func(t *testing.T) { testReap(t, store) })
+	t.Run("複数のgoroutineから同時にAcquireを呼び出す", func(t *testing.T) { testConcurrentAcquire(t, store) })
 }
 
 // testExhausted: 枠を超えて確保することはできない
@@ -119,5 +122,50 @@ func testReap(t *testing.T, store holdfast.Store) {
 	_, err = store.Acquire(ctx, acqReq, leaseExpires.Add(time.Nanosecond))
 	if err != nil {
 		t.Fatalf("Reap 後の Acquire が失敗した: %v", err)
+	}
+}
+
+// testConcurrentAcquire: 複数のgoroutineから同時にAcquireを呼び出す
+func testConcurrentAcquire(t *testing.T, store holdfast.Store) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now()
+
+	const capacity = 10
+	const goroutines = 100
+
+	regReq := holdfast.RegisterRequest{
+		Resource: "test:concurrent",
+		Capacity: capacity,
+	}
+	err := store.Register(ctx, regReq, now)
+	if err != nil {
+		t.Fatalf("Register が失敗した: %v", err)
+	}
+
+	acqReq := holdfast.AcquireRequest{
+		Resource: "test:concurrent",
+		Units:    1,
+		TTL:      time.Minute,
+	}
+
+	var success atomic.Int64
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			_, err := store.Acquire(ctx, acqReq, now)
+			if err == nil {
+				success.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	var loaded = success.Load()
+
+	if loaded > capacity {
+		t.Fatalf("Acquire 成功数が capacity を超えた: got %d, want <= %d", loaded, capacity)
 	}
 }
