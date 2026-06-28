@@ -84,23 +84,39 @@
 
 > UnsafeStore の実験結果をここに記録する
 
+**状態：未着手（途中）** — STRETCH として着手予定。設計まで決め、実装・計測はこれから。
+- 設計：`toctou_test.go`（`package memory`）に最小の `unsafeStore`（`Register`＋`Acquire` のみ、mutex なし、check↔use 間に `runtime.Gosched()`）を置く。`resourceState`/`isExhausted` はパッケージ内既存型を流用。
+- 計測：N 回試行し、capacity=C・goroutine 数 G で「成功数 > C」の回数を数えて発生率を出す。集計は `atomic.Int64`。`G = 2 / 10 / 100` で比較。
+- 実行：**`-race` を付けずに**走らせる（UnsafeStore は意図的に race を持つ。測りたいのは data race そのものでなく論理的な過剰確保率）。テスト名を `TestTOCTOU…` にして `-run` で狙い撃ち。
+- 残り：実装 → 計測して下表を埋める → クイズ②Q4/Q5 に回答。
+
 | 試行回数 | goroutine 数 | capacity | 過剰確保発生回数 | 発生率 |
 |---|---|---|---|---|
 | | | | | |
 
 ### ハマりメモ
 
-<!-- 実装中に詰まったことをここに書く -->
+- **テストが一生終わらない（再入デッドロック）。** `Commit`/`Release` の先頭で `s.mu.Lock()` してから、内部で `validateLease` を呼び、その `validateLease` も `s.mu.Lock()` していた。`sync.Mutex` は**再入不可（non-reentrant）**なので、同じ goroutine でもすでに握っている錠前をもう一度 `Lock()` すると「自分が Unlock するのを自分が待つ」状態になり永久にハングする。
+  → 直し方：ロック済み前提の内部ヘルパー（`validateLease`）からは `Lock`/`Unlock` を**外す**。「公開メソッドが錠前を取り、小文字の内部メソッドはロック済み前提」という分業にする。
+- **`const` に `:=` は使えない。** `const capacity := 10` は文法エラー。`:=` は「変数の短縮宣言」専用で、定数は `const capacity = 10`（`=`）。コンパイル時に確定する固定値は `const`、実行時に決まる値は `:=`/`var`。
+- **`wg.Add` の位置。** ループ前 `Add(goroutines)` でもループ内 `Add(1)`（`go` の前）でも正しい。Wait はループ後に呼ばれ、その時点でカウンタは確定しているため。NG なのは **goroutine の中で `Add(1)`**（Wait と並行に走り早期終了しうる）。
+- **`for i := 0; i < n; i++` の現代化。** `i` を使わないなら Go 1.22+ の `for range n` が素直（gopls が "range over int" を提案する）。
 
 ### 設計メモ
 
-<!-- なぜそう設計したかをここに書く -->
+- **並行テストは conformance に置く。** 「並行下でも枠を超えない」は memory 固有でなく全バックエンドで成り立つべき不変条件①なので、適合テスト（背骨）に入れる。Postgres/Raft でも同じテストが効く。
+- **テストの集計は `atomic.Int64`。** 成功数を素の `int++` で数えると**テスト自身が data race を持ち込み**、実装のバグと区別できなくなる。goroutine 内で `_, err :=`（`:=`）にして `err` を goroutine ローカルにするのも同じ理由（`=` だと共有 err への並行書き込みになる）。
+- **まず全体で1つの coarse-grained mutex。** 一部フィールドしか書かなくても全体を直列化するためスループットは落ちるが、教育的順序「素直に作る→測る→緩める」に従い、細粒度ロック（リソースごとの錠前）は STRETCH に回す。
+- **Read 専用でも保護は要る。** `validateLease` は読み取りだけだが、他 goroutine の Write と並行すれば race。ただし「validateLease 自身が錠前を取る」必要はなく「呼び出し側のロックの傘の下で読む」。＝「読み取りにも保護は要るが、誰が錠前を取るかは別問題」。
+- **`UnsafeStore` は `_test.go` に隔離。** わざと不変条件を破る実験用なので、本番ビルドに漏れないよう test-only にする。`conformance.Run` には通さない（必ず落ちるため）。ファイル名は `toctou_test.go`（実験内容を表す名前。`unsafe_test.go` は標準 `unsafe` と紛らわしく避ける）。
 
 ### ミスログ
 
 | # | やらかし | 原因 | 覚えること |
 |---|---|---|---|
-| | | | |
+| 1 | `Commit`/`Release` でテストが永久ハング | ロック済みの公開メソッドから、また `Lock` する `validateLease` を呼んだ（再入デッドロック） | `sync.Mutex` は再入不可。内部ヘルパーはロックを取らず「ロック済み前提」にする |
+| 2 | クイズ①Q3 で happens-before を「同時に1つ」と説明 | 相互排他と happens-before（可視性順序）を混同 | mutex が race を消すのは「Unlock→Lock の happens-before で書き込みを可視化するから」 |
+| 3 | クイズ①Q5 で「ロック保持でOOM」と記述 | 誤った因果 | mutex 保持の害はメモリ枯渇でなく他 goroutine のブロック（デッドロック/スタベーション） |
 
 ---
 
